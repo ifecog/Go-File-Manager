@@ -1,0 +1,16 @@
+# Environment variables
+.env
+
+# Build artifacts
+/bin
+*.exe
+
+# Dependencies
+vendor/
+
+# Uploads
+uploads/
+
+# IDE files
+.vscode/
+.idea/
