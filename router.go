@@ -26,6 +26,7 @@ func SetupRouter() *chi.Mux {
 	})
 
 	r.Post("/upload", handlers.UploadFile)
+	r.Get("/files/{id}", handlers.GetFile)
 
 	return r
 }
