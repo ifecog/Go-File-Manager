@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,52 +29,53 @@ var allowedExtensions = map[string]bool{
 func UploadFile(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(100 << 20)
 	if err != nil {
-		http.Error(w, "Unablle to parse form", http.StatusBadRequest)
+		http.Error(w, "Unable to parse form", http.StatusBadRequest)
 		return
 	}
 
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "File is required", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
+	var responses []UploadResponse
 
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if !allowedExtensions[ext] {
-		http.Error(w, "Unsupported file type", http.StatusBadRequest)
-		return
+	files := r.MultipartForm.File["file"]
+	for _, header := range files {
+		ext := strings.ToLower(filepath.Ext(header.Filename))
+		if !allowedExtensions[ext] {
+			http.Error(w, "Unsupported file type: "+header.Filename, http.StatusBadRequest)
+			return
+		}
+
+		dateFolder := time.Now().Format("2006-01-02")
+		storagePath := filepath.Join("uploads", dateFolder)
+		if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
+			http.Error(w, "Failed to create folder", http.StatusInternalServerError)
+			return
+		}
+
+		file, err := header.Open()
+		if err != nil {
+			http.Error(w, "Failed to open file", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		fileID := uuid.New().String()
+		newFileName := fileID + ext
+		fullPath := filepath.Join(storagePath, newFileName)
+
+		dst, err := os.Create(fullPath)
+		if err != nil {
+			http.Error(w, "Failed to save file", http.StatusInternalServerError)
+			return
+		}
+		defer dst.Close()
+		io.Copy(dst, file)
+
+		responses = append(responses, UploadResponse{
+			ID:           fileID,
+			OriginalName: header.Filename,
+			URL:          fmt.Sprintf("/api/v1/files/%s", fileID),
+		})
 	}
 
-	dateFolder := time.Now().Format("2006-01-02")
-	storagePath := filepath.Join("uploads", dateFolder)
-	if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
-		http.Error(w, "Failed to create folder", http.StatusInternalServerError)
-		return
-	}
-
-	fileID := uuid.New().String()
-	newFileName := fileID + ext
-	fullPath := filepath.Join(storagePath, newFileName)
-
-	dst, err := os.Create(fullPath)
-	if err != nil {
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-	io.Copy(dst, file)
-
-	mimeType := mime.TypeByExtension(ext)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
-	resp := UploadResponse{
-		ID:           fileID,
-		OriginalName: header.Filename,
-		URL:          fmt.Sprintf("/api/v1/files/%s", fileID),
-	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(responses)
 }
