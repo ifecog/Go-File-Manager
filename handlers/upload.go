@@ -41,14 +41,12 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Validate extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if !allowedExtensions[ext] {
 		http.Error(w, "Unsupported file type", http.StatusBadRequest)
 		return
 	}
 
-	// Create folder by date
 	dateFolder := time.Now().Format("2006-01-02")
 	storagePath := filepath.Join("uploads", dateFolder)
 	if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
@@ -56,12 +54,10 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate UUID filename
 	fileID := uuid.New().String()
 	newFileName := fileID + ext
 	fullPath := filepath.Join(storagePath, newFileName)
 
-	// Save file
 	dst, err := os.Create(fullPath)
 	if err != nil {
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
@@ -75,11 +71,10 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		mimeType = "application/octet-stream"
 	}
 
-	// JSON Response
 	resp := UploadResponse{
 		ID:           fileID,
 		OriginalName: header.Filename,
-		URL:          fmt.Sprintf("/files/%s", fileID),
+		URL:          fmt.Sprintf("/api/v1/files/%s", fileID),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

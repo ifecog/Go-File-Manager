@@ -25,8 +25,10 @@ func SetupRouter() *chi.Mux {
 		w.Write([]byte("OK"))
 	})
 
-	r.Post("/upload", handlers.UploadFile)
-	r.Get("/files/{id}", handlers.GetFile)
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Post("/upload", handlers.UploadFile)
+		r.Get("/files/{id}", handlers.GetFile)
+	})
 
 	return r
 }

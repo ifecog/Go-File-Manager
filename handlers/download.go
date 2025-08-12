@@ -6,10 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func GetFile(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/files/")
+	id := chi.URLParam(r, "id")
+	// fmt.Println("Requested ID:", chi.URLParam(r, "id"))
 
 	foundPath := ""
 	err := filepath.Walk("uploads", func(path string, info os.FileInfo, err error) error {
