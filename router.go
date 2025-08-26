@@ -11,7 +11,6 @@ import (
 func SetupRouter() *chi.Mux {
 	r := chi.NewRouter()
 
-	// Middlewares
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
@@ -20,13 +19,12 @@ func SetupRouter() *chi.Mux {
 		w.Write([]byte(`{"service":"CLRD File API","status":"running","version":"1.0.0"}`))
 	})
 
-	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("OK"))
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(APIKeyMiddleware)
+		// r.Use(APIKeyMiddleware)
 
 		r.Post("/upload", handlers.UploadFile)
 		r.Get("/files/{id}", handlers.GetFile)

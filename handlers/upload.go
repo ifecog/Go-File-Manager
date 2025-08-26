@@ -30,9 +30,18 @@ var allowedExtensions = map[string]bool{
 func scanWithClamAV(filePath string) error {
 	cmd := exec.Command("clamscan", "--no-summary", filePath)
 	output, err := cmd.CombinedOutput()
+	fmt.Println("ClamAV scan output:", string(output))
+
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				return fmt.Errorf("virus detected")
+			}
+		}
+
 		return fmt.Errorf("clamav scan error: %v", err)
 	}
+
 	if strings.Contains(string(output), "FOUND") {
 		return fmt.Errorf("virus detected")
 	}
@@ -66,46 +75,6 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		tmpDir := "temp_uploads"
-		if err := os.MkdirAll(tmpDir, os.ModePerm); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "Failed to create temp folder",
-				"data":    nil,
-			})
-			return
-		}
-
-		tempFilePath := filepath.Join(tmpDir, uuid.New().String()+ext)
-		tempFile, err := os.Create(tempFilePath)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "Failed to create temp file",
-				"data":    nil,
-			})
-			return
-		}
-
-		src, _ := header.Open()
-		io.Copy(tempFile, src)
-		tempFile.Close()
-		src.Close()
-
-		// Scan file for viruses
-		if err := scanWithClamAV(tempFilePath); err != nil {
-			os.Remove(tempFilePath) // delete infected file
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "File rejected: contains a virus",
-				"data":    nil,
-			})
-			return
-		}
-
 		dateFolder := time.Now().Format("2006-01-02")
 		storagePath := filepath.Join("uploads", dateFolder)
 		if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
@@ -120,15 +89,22 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 
 		finalID := uuid.New().String()
 		finalPath := filepath.Join(storagePath, finalID+ext)
-		if err := os.Rename(tempFilePath, finalPath); err != nil {
+
+		dst, err := os.Create(finalPath)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":  "error",
-				"message": "Failed to move file to final location",
+				"message": "Failed to save file",
 				"data":    nil,
 			})
 			return
 		}
+		defer dst.Close()
+
+		src, _ := header.Open()
+		io.Copy(dst, src)
+		src.Close()
 
 		BASE_URL := os.Getenv("BASE_URL")
 		responses = append(responses, UploadResponse{
@@ -136,6 +112,17 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 			OriginalName: header.Filename,
 			URL:          fmt.Sprintf("%s/api/v1/files/%s", BASE_URL, finalID),
 		})
+
+		go func(path string) {
+			if err := scanWithClamAV(path); err != nil {
+				fmt.Printf("⚠️ Virus found in %s. Deleting...\n", path)
+				if removeErr := os.Remove(path); removeErr != nil {
+					fmt.Printf("❌ Failed to delete %s: %v\n", path, removeErr)
+				} else {
+					fmt.Printf("✅ Successfully deleted %s\n", path)
+				}
+			}
+		}(finalPath)
 	}
 
 	// 	dateFolder := time.Now().Format("2006-01-02")
