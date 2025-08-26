@@ -130,10 +130,11 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		BASE_URL := os.Getenv("BASE_URL")
 		responses = append(responses, UploadResponse{
 			ID:           finalID,
 			OriginalName: header.Filename,
-			URL:          fmt.Sprintf("/api/v1/files/%s", finalID),
+			URL:          fmt.Sprintf("%s/api/v1/files/%s", BASE_URL, finalID),
 		})
 	}
 
