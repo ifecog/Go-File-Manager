@@ -26,7 +26,7 @@ func SetupRouter() *chi.Mux {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// r.Use(APIKeyMiddleware)
+		r.Use(APIKeyMiddleware)
 
 		r.Post("/upload", handlers.UploadFile)
 		r.Get("/files/{id}", handlers.GetFile)
