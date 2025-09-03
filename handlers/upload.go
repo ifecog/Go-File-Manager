@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -178,5 +179,57 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": "File(s) uploaded successfully",
 		"data":    responses,
+	})
+}
+
+func DeleteFile(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "id")
+	if fileID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "File ID is required",
+			"data":    nil,
+		})
+		return
+	}
+
+	uploadsRoot := "uploads"
+	var filePath string
+	err := filepath.Walk(uploadsRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && strings.HasPrefix(info.Name(), fileID) {
+			filePath = path
+			return filepath.SkipDir
+		}
+		return nil
+	})
+
+	if err != nil || filePath == "" {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "File not found",
+			"data":    nil,
+		})
+		return
+	}
+
+	if removeErr := os.Remove(filePath); removeErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "Failed to delete file",
+			"data":    nil,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "File deleted successfully",
+		"data": map[string]string{
+			"id": fileID,
+		},
 	})
 }
