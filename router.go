@@ -30,6 +30,7 @@ func SetupRouter() *chi.Mux {
 
 		r.Post("/upload", handlers.UploadFile)
 		r.Get("/files/{id}", handlers.GetFile)
+		r.Delete("/files/{id}", handlers.DeleteFile)
 	})
 
 	return r
