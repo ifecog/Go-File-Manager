@@ -29,7 +29,7 @@ var allowedExtensions = map[string]bool{
 }
 
 func scanWithClamAV(filePath string) error {
-	cmd := exec.Command("clamscan", "--no-summary", filePath)
+	cmd := exec.Command("clamdscan", "--no-summary", filePath)
 	output, err := cmd.CombinedOutput()
 	fmt.Println("ClamAV scan output:", string(output))
 
@@ -40,7 +40,7 @@ func scanWithClamAV(filePath string) error {
 			}
 		}
 
-		return fmt.Errorf("clamav scan error: %v", err)
+		return fmt.Errorf("clamdscan scan error: %v", err)
 	}
 
 	if strings.Contains(string(output), "FOUND") {
