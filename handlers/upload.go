@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,26 +27,26 @@ var allowedExtensions = map[string]bool{
 	".mp4": true, ".avi": true, ".mov": true, ".mkv": true,
 }
 
-func scanWithClamAV(filePath string) error {
-	cmd := exec.Command("clamdscan", "--no-summary", filePath)
-	output, err := cmd.CombinedOutput()
-	fmt.Println("ClamAV scan output:", string(output))
+// func scanWithClamAV(filePath string) error {
+// 	cmd := exec.Command("clamdscan", "--no-summary", filePath)
+// 	output, err := cmd.CombinedOutput()
+// 	fmt.Println("ClamAV scan output:", string(output))
 
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
-				return fmt.Errorf("virus detected")
-			}
-		}
+// 	if err != nil {
+// 		if exitErr, ok := err.(*exec.ExitError); ok {
+// 			if exitErr.ExitCode() == 1 {
+// 				return fmt.Errorf("virus detected")
+// 			}
+// 		}
 
-		return fmt.Errorf("clamdscan scan error: %v", err)
-	}
+// 		return fmt.Errorf("clamdscan scan error: %v", err)
+// 	}
 
-	if strings.Contains(string(output), "FOUND") {
-		return fmt.Errorf("virus detected")
-	}
-	return nil
-}
+// 	if strings.Contains(string(output), "FOUND") {
+// 		return fmt.Errorf("virus detected")
+// 	}
+// 	return nil
+// }
 
 func UploadFile(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(100 << 20)
@@ -115,12 +114,12 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		})
 
 		go func(path string) {
-			if err := scanWithClamAV(path); err != nil {
-				fmt.Printf("⚠️ Virus found in %s. Deleting...\n", path)
+			if err := ScanWithClamAVDaemon(path); err != nil {
+				fmt.Printf("Virus found in %s. Deleting...\n", path)
 				if removeErr := os.Remove(path); removeErr != nil {
-					fmt.Printf("❌ Failed to delete %s: %v\n", path, removeErr)
+					fmt.Printf("Failed to delete %s: %v\n", path, removeErr)
 				} else {
-					fmt.Printf("✅ Successfully deleted %s\n", path)
+					fmt.Printf("Successfully deleted %s\n", path)
 				}
 			}
 		}(finalPath)
