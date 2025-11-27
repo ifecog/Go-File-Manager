@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 
@@ -11,13 +10,13 @@ import (
 func ScanWithClamAVDaemon(filePath string) error {
 	c := clamd.NewClamd(os.Getenv("CLAMAV_IP"))
 
-	fileBytes, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
 	if err != nil {
-		return fmt.Errorf("unable to read file: %v", err)
+		return fmt.Errorf("unable to open file: %v", err)
 	}
+	defer f.Close()
 
-	reader := bytes.NewReader(fileBytes)
-	response, err := c.ScanStream(reader, make(chan bool))
+	response, err := c.ScanStream(f, make(chan bool))
 	if err != nil {
 		return fmt.Errorf("clamd scan failed: %v", err)
 	}

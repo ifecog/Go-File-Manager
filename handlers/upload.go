@@ -27,36 +27,28 @@ var allowedExtensions = map[string]bool{
 	".mp4": true, ".avi": true, ".mov": true, ".mkv": true,
 }
 
-// func scanWithClamAV(filePath string) error {
-// 	cmd := exec.Command("clamdscan", "--no-summary", filePath)
-// 	output, err := cmd.CombinedOutput()
-// 	fmt.Println("ClamAV scan output:", string(output))
+func writeError(w http.ResponseWriter, msg string, code int) {
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "error",
+		"message": msg,
+		"data":    nil,
+	})
+}
 
-// 	if err != nil {
-// 		if exitErr, ok := err.(*exec.ExitError); ok {
-// 			if exitErr.ExitCode() == 1 {
-// 				return fmt.Errorf("virus detected")
-// 			}
-// 		}
-
-// 		return fmt.Errorf("clamdscan scan error: %v", err)
-// 	}
-
-// 	if strings.Contains(string(output), "FOUND") {
-// 		return fmt.Errorf("virus detected")
-// 	}
-// 	return nil
-// }
+func writeSuccess(w http.ResponseWriter, msg string, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": msg,
+		"data":    data,
+	})
+}
 
 func UploadFile(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(100 << 20)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "error",
-			"message": "Unable to parse form",
-			"data":    nil,
-		})
+		writeError(w, "Unable to parse form", http.StatusBadRequest)
 		return
 	}
 
@@ -66,24 +58,14 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	for _, header := range files {
 		ext := strings.ToLower(filepath.Ext(header.Filename))
 		if !allowedExtensions[ext] {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "Unsupported file type: " + header.Filename,
-				"data":    nil,
-			})
+			writeError(w, "Unsupported file type: "+header.Filename, http.StatusBadRequest)
 			return
 		}
 
 		dateFolder := time.Now().Format("2006-01-02")
 		storagePath := filepath.Join("uploads", dateFolder)
 		if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "Failed to create folder",
-				"data":    nil,
-			})
+			writeError(w, "Failed to create folder", http.StatusInternalServerError)
 			return
 		}
 
@@ -92,19 +74,36 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 
 		dst, err := os.Create(finalPath)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "error",
-				"message": "Failed to save file",
-				"data":    nil,
-			})
+			writeError(w, "Failed to save file", http.StatusInternalServerError)
 			return
 		}
-		defer dst.Close()
 
-		src, _ := header.Open()
-		io.Copy(dst, src)
+		src, err := header.Open()
+		if err != nil {
+			dst.Close()
+			writeError(w, "Failed to open uploaded file", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = io.Copy(dst, src)
+		dst.Close()
 		src.Close()
+
+		if err != nil {
+			os.Remove(finalPath)
+			writeError(w, "Failed to save file", http.StatusInternalServerError)
+			return
+		}
+
+		// Scan the file synchronously before adding to response
+		if err := ScanWithClamAVDaemon(finalPath); err != nil {
+			fmt.Printf("Virus found in %s: %v. Deleting...\n", finalPath, err)
+			if removeErr := os.Remove(finalPath); removeErr != nil {
+				fmt.Printf("Failed to delete %s: %v\n", finalPath, removeErr)
+			}
+			writeError(w, "File failed security scan: "+header.Filename, http.StatusBadRequest)
+			return
+		}
 
 		BASE_URL := os.Getenv("BASE_URL")
 		responses = append(responses, UploadResponse{
@@ -112,73 +111,9 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 			OriginalName: header.Filename,
 			URL:          fmt.Sprintf("%s/api/v1/files/%s", BASE_URL, finalID),
 		})
-
-		go func(path string) {
-			if err := ScanWithClamAVDaemon(path); err != nil {
-				fmt.Printf("Virus found in %s. Deleting...\n", path)
-				if removeErr := os.Remove(path); removeErr != nil {
-					fmt.Printf("Failed to delete %s: %v\n", path, removeErr)
-				} else {
-					fmt.Printf("Successfully deleted %s\n", path)
-				}
-			}
-		}(finalPath)
 	}
 
-	// 	dateFolder := time.Now().Format("2006-01-02")
-	// 	storagePath := filepath.Join("uploads", dateFolder)
-	// 	if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
-	// 		w.WriteHeader(http.StatusInternalServerError)
-	// 		json.NewEncoder(w).Encode(map[string]interface{}{
-	// 			"status":  "error",
-	// 			"message": "Failed to create folder",
-	// 			"data":    nil,
-	// 		})
-	// 		return
-	// 	}
-
-	// 	file, err := header.Open()
-	// 	if err != nil {
-	// 		w.WriteHeader(http.StatusInternalServerError)
-	// 		json.NewEncoder(w).Encode(map[string]interface{}{
-	// 			"status":  "error",
-	// 			"message": "Failed to open file",
-	// 			"data":    nil,
-	// 		})
-	// 		return
-	// 	}
-	// 	defer file.Close()
-
-	// 	fileID := uuid.New().String()
-	// 	newFileName := fileID + ext
-	// 	fullPath := filepath.Join(storagePath, newFileName)
-
-	// 	dst, err := os.Create(fullPath)
-	// 	if err != nil {
-	// 		w.WriteHeader(http.StatusInternalServerError)
-	// 		json.NewEncoder(w).Encode(map[string]interface{}{
-	// 			"status":  "error",
-	// 			"message": "Failed to save file",
-	// 			"data":    nil,
-	// 		})
-	// 		return
-	// 	}
-	// 	defer dst.Close()
-	// 	io.Copy(dst, file)
-
-	// 	responses = append(responses, UploadResponse{
-	// 		ID:           fileID,
-	// 		OriginalName: header.Filename,
-	// 		URL:          fmt.Sprintf("/api/v1/files/%s", fileID),
-	// 	})
-	// }
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "success",
-		"message": "File(s) uploaded successfully",
-		"data":    responses,
-	})
+	writeSuccess(w, "File(s) uploaded successfully", responses)
 }
 
 func DeleteFile(w http.ResponseWriter, r *http.Request) {
