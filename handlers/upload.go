@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -26,10 +27,28 @@ var allowedExtensions = map[string]bool{
 	".mp4": true, ".avi": true, ".mov": true, ".mkv": true,
 }
 
+func writeError(w http.ResponseWriter, msg string, code int) {
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "error",
+		"message": msg,
+		"data":    nil,
+	})
+}
+
+func writeSuccess(w http.ResponseWriter, msg string, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": msg,
+		"data":    data,
+	})
+}
+
 func UploadFile(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(100 << 20)
 	if err != nil {
-		http.Error(w, "Unable to parse form", http.StatusBadRequest)
+		writeError(w, "Unable to parse form", http.StatusBadRequest)
 		return
 	}
 
@@ -39,43 +58,112 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	for _, header := range files {
 		ext := strings.ToLower(filepath.Ext(header.Filename))
 		if !allowedExtensions[ext] {
-			http.Error(w, "Unsupported file type: "+header.Filename, http.StatusBadRequest)
+			writeError(w, "Unsupported file type: "+header.Filename, http.StatusBadRequest)
 			return
 		}
 
 		dateFolder := time.Now().Format("2006-01-02")
 		storagePath := filepath.Join("uploads", dateFolder)
 		if err := os.MkdirAll(storagePath, os.ModePerm); err != nil {
-			http.Error(w, "Failed to create folder", http.StatusInternalServerError)
+			writeError(w, "Failed to create folder", http.StatusInternalServerError)
 			return
 		}
 
-		file, err := header.Open()
+		finalID := uuid.New().String()
+		finalPath := filepath.Join(storagePath, finalID+ext)
+
+		dst, err := os.Create(finalPath)
 		if err != nil {
-			http.Error(w, "Failed to open file", http.StatusInternalServerError)
+			writeError(w, "Failed to save file", http.StatusInternalServerError)
 			return
 		}
-		defer file.Close()
 
-		fileID := uuid.New().String()
-		newFileName := fileID + ext
-		fullPath := filepath.Join(storagePath, newFileName)
-
-		dst, err := os.Create(fullPath)
+		src, err := header.Open()
 		if err != nil {
-			http.Error(w, "Failed to save file", http.StatusInternalServerError)
+			dst.Close()
+			writeError(w, "Failed to open uploaded file", http.StatusInternalServerError)
 			return
 		}
-		defer dst.Close()
-		io.Copy(dst, file)
 
+		_, err = io.Copy(dst, src)
+		dst.Close()
+		src.Close()
+
+		if err != nil {
+			os.Remove(finalPath)
+			writeError(w, "Failed to save file", http.StatusInternalServerError)
+			return
+		}
+
+		// Scan the file synchronously before adding to response
+		if err := ScanWithClamAVDaemon(finalPath); err != nil {
+			fmt.Printf("Virus found in %s: %v. Deleting...\n", finalPath, err)
+			if removeErr := os.Remove(finalPath); removeErr != nil {
+				fmt.Printf("Failed to delete %s: %v\n", finalPath, removeErr)
+			}
+			writeError(w, "File failed security scan: "+header.Filename, http.StatusBadRequest)
+			return
+		}
+
+		BASE_URL := os.Getenv("BASE_URL")
 		responses = append(responses, UploadResponse{
-			ID:           fileID,
+			ID:           finalID,
 			OriginalName: header.Filename,
-			URL:          fmt.Sprintf("/api/v1/files/%s", fileID),
+			URL:          fmt.Sprintf("%s/api/v1/files/%s", BASE_URL, finalID),
 		})
 	}
 
+	writeSuccess(w, "File(s) uploaded successfully", responses)
+}
+
+func DeleteFile(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "id")
+	if fileID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "File ID is required",
+			"data":    nil,
+		})
+		return
+	}
+
+	uploadsRoot := "uploads"
+	var filePath string
+	err := filepath.Walk(uploadsRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && strings.HasPrefix(info.Name(), fileID) {
+			filePath = path
+			return filepath.SkipDir
+		}
+		return nil
+	})
+
+	if err != nil || filePath == "" {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "File not found",
+			"data":    nil,
+		})
+		return
+	}
+
+	if removeErr := os.Remove(filePath); removeErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "Failed to delete file",
+			"data":    nil,
+		})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(responses)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "File deleted successfully",
+		"data": map[string]string{
+			"id": fileID,
+		},
+	})
 }
